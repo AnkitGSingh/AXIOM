@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
+import { useSpring, animated } from '@react-spring/three'
 import { useFrame } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
@@ -17,14 +18,30 @@ export default function SuitModel() {
   const eyeRightRef     = useRef<THREE.Mesh>(null)
   const animatedBonesRef  = useRef<Record<string, THREE.Object3D>>({})
   const baseRotationsRef  = useRef<Record<string, THREE.Euler>>({})
-  const phase = useAXIOMStore((state) => state.phase)
+  const phase    = useAXIOMStore((state) => state.phase)
+  const setPhase  = useAXIOMStore((state) => state.setPhase)
+
+  // phaseRef avoids stale closure in the spring onRest callback
+  const phaseRef = useRef(phase)
+  phaseRef.current = phase
+
+  // Drop spring: suit falls from y=50 (off-screen above) to y=-1.3 (ground) over 2s
+  const { posY } = useSpring({
+    posY: phase === AnimationPhase.IDLE || phase === AnimationPhase.LOADING ? 50 : -1.3,
+    config: { duration: 2000 },
+    onRest: () => {
+      if (phaseRef.current === AnimationPhase.LANDING) {
+        setPhase(AnimationPhase.RISING)
+      }
+    },
+  })
 
   useEffect(() => {
     if (!scene) return
 
     // ── MARK 42 MATERIALS ─────────────────────────────────────────────────
     const armourMaterial = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color('#8A0F14'),
+      color: new THREE.Color('#0D0D0D'),
       metalness: 0.84,
       roughness: 0.2,
       clearcoat: 1.0,
@@ -33,8 +50,8 @@ export default function SuitModel() {
     })
 
     const jointsMaterial = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color('#D4B15B'),
-      metalness: 0.6,
+      color: new THREE.Color('#C9A84C'),
+      metalness: 1.0,
       roughness: 0.28,
       clearcoat: 0.5,
       clearcoatRoughness: 0.3,
@@ -80,6 +97,7 @@ export default function SuitModel() {
       if (bn(child, 'LeftHand'))      { child.rotation.x =  0 }
       if (bn(child, 'RightHand'))     { child.rotation.x =  0 }
 
+      if (bn(child, 'Spine1'))        captureBase('spine1', child)
       if (bn(child, 'Spine2'))        captureBase('spine2', child)
       if (bn(child, 'Head'))          captureBase('head', child)
       if (bn(child, 'LeftShoulder'))  captureBase('leftShoulder', child)
@@ -108,23 +126,13 @@ export default function SuitModel() {
     const t = state.clock.elapsedTime
 
     if (groupRef.current) {
-      const cinematicPhase =
-        phase === AnimationPhase.LOADING ||
-        phase === AnimationPhase.HUD_INTRO ||
-        phase === AnimationPhase.LANDING ||
-        phase === AnimationPhase.RISING
-
-      const targetY = cinematicPhase ? -1.08 : -0.9
+      // Spring owns Y for the drop — only override once settled for interactive bob
       const bob =
         phase === AnimationPhase.INTERACTIVE || phase === AnimationPhase.PROJECT_VIEW
           ? Math.sin(t * 1.0) * 0.012
           : 0
+      if (bob !== 0) groupRef.current.position.y = -1.3 + bob
 
-      groupRef.current.position.y = THREE.MathUtils.lerp(
-        groupRef.current.position.y,
-        targetY + bob,
-        0.08
-      )
       groupRef.current.rotation.y = THREE.MathUtils.lerp(
         groupRef.current.rotation.y,
         Math.sin(t * 0.32) * 0.05,
@@ -168,19 +176,14 @@ export default function SuitModel() {
 
     // ── Attach arc reactor to Spine1 bone every frame ─────────────────
     if (arcReactorRef.current) {
-      scene.traverse((child) => {
-        if (
-          child.name === 'mixamorig:Spine2' ||
-          child.name === 'mixamorigSpine2' ||
-          child.name === 'Spine2'
-        ) {
-          const worldPos = new THREE.Vector3()
-          child.getWorldPosition(worldPos)
-          arcReactorRef.current!.position.copy(worldPos)
-          arcReactorRef.current!.position.z += 0.22
-          arcReactorRef.current!.position.y += 0.08
-        }
-      })
+      const spine1 = animatedBonesRef.current.spine1
+      if (spine1) {
+        const worldPos = new THREE.Vector3()
+        spine1.getWorldPosition(worldPos)
+        arcReactorRef.current.position.copy(worldPos)
+        arcReactorRef.current.position.z += 0.22
+        arcReactorRef.current.position.y += 0.08
+      }
       if (arcLightRef.current) {
         arcLightRef.current.position.copy(arcReactorRef.current.position)
       }
@@ -191,27 +194,21 @@ export default function SuitModel() {
 
     // ── Attach eye slits to Head bone every frame ─────────────────────
     if (eyeLeftRef.current && eyeRightRef.current) {
-      scene.traverse((child) => {
-        if (
-          child.name === 'mixamorig:Head' ||
-          child.name === 'mixamorigHead' ||
-          child.name === 'Head'
-        ) {
-          const worldPos = new THREE.Vector3()
-          child.getWorldPosition(worldPos)
-
-          eyeLeftRef.current!.position.set(
-            worldPos.x - 0.038,
-            worldPos.y + 0.07,
-            worldPos.z + 0.14
-          )
-          eyeRightRef.current!.position.set(
-            worldPos.x + 0.038,
-            worldPos.y + 0.07,
-            worldPos.z + 0.14
-          )
-        }
-      })
+      const head = animatedBonesRef.current.head
+      if (head) {
+        const worldPos = new THREE.Vector3()
+        head.getWorldPosition(worldPos)
+        eyeLeftRef.current.position.set(
+          worldPos.x - 0.038,
+          worldPos.y + 0.07,
+          worldPos.z + 0.14
+        )
+        eyeRightRef.current.position.set(
+          worldPos.x + 0.038,
+          worldPos.y + 0.07,
+          worldPos.z + 0.14
+        )
+      }
       // Pulse eyes in sync
       const intensity = 11.0 + Math.sin(t * 2.2 + 0.3) * 1.0
       ;(eyeLeftRef.current.material as THREE.MeshStandardMaterial).emissiveIntensity = intensity
@@ -223,10 +220,10 @@ export default function SuitModel() {
 
   return (
     <>
-      {/* Suit model */}
-      <group ref={groupRef} position={[0, -1.3, 0]} rotation={[0, 0.1, 0]} scale={[0.012, 0.012, 0.012]}>
+      {/* Suit model — Y position spring-driven; drops from 50 to -1.3 on LANDING */}
+      <animated.group ref={groupRef} position-y={posY} rotation={[0, 0.1, 0]} scale={[0.012, 0.012, 0.012]}>
         <primitive object={scene} />
-      </group>
+      </animated.group>
 
       {/* Arc Reactor — position updated every frame via ref */}
       <mesh ref={arcReactorRef}>

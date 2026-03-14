@@ -1,10 +1,40 @@
 'use client'
 
-import { Suspense } from 'react'
+import { Suspense, useEffect } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls, Environment } from '@react-three/drei'
 // Bloom intentionally disabled for clean "eyes + reactor only" lighting.
 import SuitModel from './SuitModel'
+import ParticleGrid from './ParticleGrid'
+import ShockwaveRing from './ShockwaveRing'
+import ImpactEffects from './ImpactEffects'
+import GroundShadow from './GroundShadow'
+import { useAXIOMStore, AnimationPhase } from '@/lib/store/useAXIOMStore'
+import { LoadingScreen } from '@/components/hud/LoadingScreen'
+
+// Drives the phase machine: IDLE → LANDING → HUD_INTRO
+// Lives inside Canvas so it has access to the R3F context if needed.
+function LandingTrigger() {
+  const phase    = useAXIOMStore((s) => s.phase)
+  const setPhase = useAXIOMStore((s) => s.setPhase)
+
+  // Fire LANDING 800ms after mount (gives scene time to settle)
+  useEffect(() => {
+    if (phase !== AnimationPhase.IDLE) return
+    const t = setTimeout(() => setPhase(AnimationPhase.LANDING), 800)
+    return () => clearTimeout(t)
+  }, [phase, setPhase])
+
+  // Spring onRest in SuitModel fires RISING when the drop finishes.
+  // Advance to HUD_INTRO 600ms after that so the landing pose is briefly held.
+  useEffect(() => {
+    if (phase !== AnimationPhase.RISING) return
+    const t = setTimeout(() => setPhase(AnimationPhase.HUD_INTRO), 600)
+    return () => clearTimeout(t)
+  }, [phase, setPhase])
+
+  return null
+}
 
 function Lights() {
   return (
@@ -38,16 +68,24 @@ function Lights() {
 
 export default function AXIOMScene() {
   return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <LoadingScreen />
     <Canvas
-      camera={{ position: [0, 1.2, 5.0], fov: 38 }}
+      camera={{ position: [0, 0.8, 7.0], fov: 44 }}
       gl={{ antialias: true, alpha: false }}
       style={{ width: '100%', height: '100%', display: 'block', background: '#080808' }}
       dpr={[1, 2]}
     >
       <Lights />
 
+      <LandingTrigger />
+      <ImpactEffects />
+
       <Suspense fallback={null}>
         <SuitModel />
+        <GroundShadow />
+        <ParticleGrid />
+        <ShockwaveRing />
         <Environment preset="studio" />
       </Suspense>
 
@@ -56,11 +94,12 @@ export default function AXIOMScene() {
       <OrbitControls
         enablePan={false}
         minDistance={2.5}
-        maxDistance={8}
-        target={[0, 0.6, 0]}
+        maxDistance={10}
+        target={[0, 0.4, 0]}
         enableDamping
         dampingFactor={0.05}
       />
     </Canvas>
+    </div>
   )
 }

@@ -30,7 +30,7 @@ interface AXIOMState {
 }
 
 export const useAXIOMStore = create<AXIOMState>((set) => ({
-  phase: AnimationPhase.HUD_INTRO,
+  phase: AnimationPhase.LOADING,
   selectedProject: null,
   isMuted: false,
   hoveredPart: null,
